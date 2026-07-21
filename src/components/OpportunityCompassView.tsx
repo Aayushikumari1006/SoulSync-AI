@@ -816,22 +816,49 @@ export const OpportunityCompassView: React.FC<OpportunityCompassViewProps> = ({
     setPrepRoadmapData(null);
     setActivePrepTab("roadmap");
 
+    console.log("[Prep UI] Initiating preparation plan request for:", opp.title);
+
+    const makeRequest = async (retryCount = 0): Promise<any> => {
+      try {
+        const response = await fetch("/api/opportunities/prep", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            opportunityId: opp.id,
+            opportunityTitle: opp.title,
+            provider: opp.provider,
+            profile,
+            mode: "live"
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!data || typeof data !== "object") {
+          throw new Error("Invalid response format received from server");
+        }
+
+        return data;
+      } catch (err: any) {
+        console.error(`[Prep UI] Request attempt ${retryCount + 1} failed:`, err.message || err);
+        if (retryCount < 1) {
+          console.log("[Prep UI] Retrying preparation plan fetching...");
+          return makeRequest(retryCount + 1);
+        }
+        throw err;
+      }
+    };
+
     try {
-      const response = await fetch("/api/opportunities/prep", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          opportunityId: opp.id,
-          opportunityTitle: opp.title,
-          provider: opp.provider,
-          profile,
-          mode: "live"
-        })
-      });
-      const data = await response.json();
+      const data = await makeRequest();
+      console.log("[Prep UI] Successfully received preparation plan:", data);
       setPrepRoadmapData(data);
     } catch (err) {
-      console.error("AI prep roadmap fetching failed:", err);
+      console.error("[Prep UI] Final preparation plan fetching failure:", err);
+      setPrepRoadmapData(null);
     } finally {
       setIsLoadingPrep(false);
     }

@@ -1007,21 +1007,179 @@ Only return valid JSON. Do not add any markdown outside the JSON block.`;
     return res.json({ opportunities: matched });
   });
 
+  // Helper to extract JSON from raw LLM output, recovering from markdown wrappers if present
+  function extractJSON(text: string): any {
+    const trimmed = text.trim();
+    try {
+      return JSON.parse(trimmed);
+    } catch (e: any) {
+      console.warn("Direct JSON parsing failed. Attempting robust regex extraction...", e.message);
+      
+      // Attempt to extract JSON from markdown block
+      const match = trimmed.match(/```json\s*([\s\S]*?)\s*```/);
+      if (match && match[1]) {
+        try {
+          return JSON.parse(match[1].trim());
+        } catch (e2) {
+          console.warn("Extraction from ```json block failed too.");
+        }
+      }
+      
+      // Attempt to locate first { and last }
+      const firstBrace = trimmed.indexOf("{");
+      const lastBrace = trimmed.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          const substring = trimmed.slice(firstBrace, lastBrace + 1);
+          return JSON.parse(substring.trim());
+        } catch (e3) {
+          console.warn("Extraction of first-to-last brace substring failed too.");
+        }
+      }
+      
+      throw e; // Re-throw original if all recovery steps fail
+    }
+  }
+
+  // Schema normalization helper to guarantee compatible structure for OpportunityCompassView.tsx
+  function normalizePrepData(raw: any): any {
+    const normalized: any = {};
+
+    console.log("[Prep Engine] Normalizing raw preparation payload keys...");
+
+    // 1. estimatedWeeks
+    normalized.estimatedWeeks = raw.estimatedWeeks || raw.durationWeeks || 4;
+
+    // 2. stages
+    if (Array.isArray(raw.stages)) {
+      normalized.stages = raw.stages.map((s: any) => ({
+        title: s.title || s.stage || "",
+        description: s.description || s.focus || ""
+      }));
+    } else if (Array.isArray(raw.roadmap)) {
+      normalized.stages = raw.roadmap.map((s: any) => ({
+        title: s.stage || s.title || "",
+        description: s.focus || s.description || ""
+      }));
+    } else {
+      normalized.stages = [
+        { title: "Stage 1: Foundation Building", description: "Establish base understanding and review prerequisites." },
+        { title: "Stage 2: Core Topic Drill", description: "Deep dive into main subjects and solve practice tasks." },
+        { title: "Stage 3: Application Polish", description: "Polish resume, portfolio, and prepare documentation." },
+        { title: "Stage 4: Mock Preparations", description: "Execute mock rounds and submit final applications." }
+      ];
+    }
+
+    // 3. weeks
+    if (Array.isArray(raw.weeks)) {
+      normalized.weeks = raw.weeks.map((w: any) => ({
+        weekNum: typeof w.weekNum === 'number' ? w.weekNum : parseInt(String(w.weekNum || w.week || "1").replace(/\D/g, '')) || 1,
+        milestone: w.milestone || "",
+        actions: Array.isArray(w.actions) ? w.actions : []
+      }));
+    } else if (Array.isArray(raw.weeklyPlan)) {
+      normalized.weeks = raw.weeklyPlan.map((w: any, index: number) => ({
+        weekNum: index + 1,
+        milestone: w.milestone || "",
+        actions: Array.isArray(w.actions) ? w.actions : []
+      }));
+    } else {
+      normalized.weeks = [
+        { weekNum: 1, milestone: "Assessment & Planning", actions: ["Analyze specific requirements and syllabus", "Set up study schedule"] },
+        { weekNum: 2, milestone: "Core Drill", actions: ["Review essential topics", "Complete 5 guided practice labs"] },
+        { weekNum: 3, milestone: "Portfolio & Presentation", actions: ["Update resume project highlight", "Create 3-minute video demo if needed"] },
+        { weekNum: 4, milestone: "Final Simulation", actions: ["Run simulation and check all forms", "Submit application portal"] }
+      ];
+    }
+
+    // 4. resources
+    const rawResources = raw.resources || raw.links || [];
+    if (Array.isArray(rawResources)) {
+      normalized.resources = rawResources.map((r: any) => ({
+        name: r.name || "Curated Reference Link",
+        url: r.url || r.link || "https://google.com",
+        platform: r.platform || r.type || "Online Reference",
+        type: r.type || "Reference"
+      }));
+    } else {
+      normalized.resources = [
+        { name: "Unstop Practice Platform", url: "https://unstop.com", platform: "Unstop", type: "Interactive Practice" },
+        { name: "GeeksforGeeks Placement Prep", url: "https://geeksforgeeks.org", platform: "GeeksforGeeks", type: "DSA" }
+      ];
+    }
+
+    // 5. portfolioSuggestion
+    if (raw.portfolioSuggestion && typeof raw.portfolioSuggestion === 'object') {
+      normalized.portfolioSuggestion = {
+        title: raw.portfolioSuggestion.title || "Custom Portfolio Showcase Project",
+        description: raw.portfolioSuggestion.description || "Develop a customized showcase project matching key requirements of the opportunity.",
+        techStack: raw.portfolioSuggestion.techStack || "React, TypeScript, Tailwind"
+      };
+    } else if (raw.projectSuggestions && Array.isArray(raw.projectSuggestions) && raw.projectSuggestions.length > 0) {
+      const proj = raw.projectSuggestions[0];
+      normalized.portfolioSuggestion = {
+        title: proj.title || "Resume Feature Project",
+        description: proj.description || "Develop a strong showcase project matching key requirements of the opportunity.",
+        techStack: Array.isArray(proj.techStack) ? proj.techStack.join(", ") : (proj.techStack || "TypeScript, React, Node.js")
+      };
+    } else if (raw.portfolioSuggestions && Array.isArray(raw.portfolioSuggestions) && raw.portfolioSuggestions.length > 0) {
+      normalized.portfolioSuggestion = {
+        title: "Resume Showcase Showcase",
+        description: raw.portfolioSuggestions[0] || "Develop a strong project matching this opportunity.",
+        techStack: "React, TypeScript, Tailwind CSS"
+      };
+    } else {
+      normalized.portfolioSuggestion = {
+        title: "Dynamic Showcase Hub",
+        description: "Develop a customized web application demonstrating key requirements of the opportunity.",
+        techStack: "TypeScript, Express, React, Tailwind"
+      };
+    }
+
+    // 6. mockQuestions
+    const rawQuestions = raw.mockQuestions || raw.practiceQuestions || raw.questions || [];
+    if (Array.isArray(rawQuestions)) {
+      normalized.mockQuestions = rawQuestions.map((q: any) => ({
+        question: q.question || "What motivates you to pursue this track?",
+        type: q.type || "Behavioral",
+        guidance: q.guidance || q.hint || "Align your personal narrative and tech passion with the organization's goals."
+      }));
+    } else {
+      normalized.mockQuestions = [
+        { question: "Why are you interested in this specific opportunity?", type: "Behavioral", guidance: "Link your academic focus and personal passion directly to their mission." }
+      ];
+    }
+
+    // 7. timeline
+    normalized.timeline = {
+      registration: raw.timeline?.registration || raw.timeline?.applicationStart || "Opened Now",
+      documentVerification: raw.timeline?.documentVerification || raw.timeline?.applicationDeadline || "Within 15 Days",
+      assessmentPeriod: raw.timeline?.assessmentPeriod || raw.timeline?.assessmentWindow || "2-3 Weeks Later",
+      resultDeclaration: raw.timeline?.resultDeclaration || raw.timeline?.resultsDate || "2 Months Later"
+    };
+
+    console.log("[Prep Engine] Successfully completed schema normalization.");
+    return normalized;
+  }
+
   // API Endpoint for generating highly detailed AI Preparation Roadmaps
   app.post("/api/opportunities/prep", async (req, res) => {
     const { opportunityId, opportunityTitle, provider, profile, mode } = req.body;
     const isLive = mode === "live" && !!ai;
 
+    console.log(`[Prep Engine] POST /api/opportunities/prep received. ID: ${opportunityId}, Title: ${opportunityTitle}, Live mode: ${isLive}`);
+
     try {
       if (isLive && ai) {
         const studentContextString = `
 Name: ${profile?.name || "Ayush"}
-Degree: ${profile?.degree || "B.Tech CSE (AI & ML)"}
-Branch: ${profile?.branch || "Computer Science & Engineering"}
-Semester: ${profile?.semester || "2nd Semester"}
-Skills: ${JSON.stringify(profile?.skillDetails || profile?.skills || [])}
-Career Goal: ${profile?.careerGoal || "AI Engineer"}
-Dream Company: ${profile?.dreamCompany || "Google Research India"}
+Degree: ${profile?.degree || "B.Tech CSE"}
+Branch: ${profile?.branch || "Computer Science"}
+Semester: ${profile?.semester || "4th Semester"}
+Skills: ${JSON.stringify(profile?.skillDetails || profile?.skills || ["React", "JavaScript"])}
+Career Goal: ${profile?.careerGoal || "Software Engineer"}
+Dream Company: ${profile?.dreamCompany || "Top Tech Brand"}
+Available Time: 10 hours/week
 `;
 
         const prompt = `You are the AI Preparation Coach for SoulSync AI.
@@ -1035,66 +1193,48 @@ ${studentContextString}
 You MUST return a JSON response containing detailed stages, a weekly plan, selected study resources, practice questions, portfolio/project suggestions, and critical interview/application tips.
 The structure MUST follow this exact schema:
 {
-  "roadmap": [
-    { "stage": "Stage 1: Foundation Building", "focus": "..." },
-    { "stage": "Stage 2: Core Topic Drill", "focus": "..." },
-    { "stage": "Stage 3: Resume & Application Polish", "focus": "..." },
-    { "stage": "Stage 4: Mock Interviews & Final Submission", "focus": "..." }
+  "estimatedWeeks": 4,
+  "stages": [
+    { "title": "Stage 1: foundation Building", "description": "recommended skills and focus in concise bullet points..." },
+    { "title": "Stage 2: Core Topic Drill", "description": "important technologies in concise bullet points..." },
+    { "title": "Stage 3: Application & Portfolio Polish", "description": "certifications & portfolio tips in concise bullet points..." },
+    { "title": "Stage 4: Mock Interviews", "description": "practice platforms and interview prep in concise bullet points..." }
   ],
-  "weeklyPlan": [
+  "weeks": [
     {
-      "week": "Week 1",
-      "milestone": "...",
-      "actions": ["Action Item 1", "Action Item 2"]
-    },
-    {
-      "week": "Week 2",
-      "milestone": "...",
-      "actions": ["Action Item 1", "Action Item 2"]
-    },
-    {
-      "week": "Week 3",
-      "milestone": "...",
-      "actions": ["Action Item 1", "Action Item 2"]
-    },
-    {
-      "week": "Week 4",
-      "milestone": "...",
-      "actions": ["Action Item 1", "Action Item 2"]
+      "weekNum": 1,
+      "milestone": "Assessment and Core Foundations",
+      "actions": ["Solve specific practice platforms tasks", "Review relevant technology docs"]
     }
   ],
   "resources": [
-    { "name": "...", "type": "Documentation / YouTube Course / Interactive Practice", "link": "..." }
+    { "name": "GeeksforGeeks DSA Self Paced", "url": "https://geeksforgeeks.org", "platform": "GeeksforGeeks", "type": "Interactive Practice" }
   ],
-  "practiceQuestions": [
-    { "question": "...", "type": "Technical / Behavioral / Portfolio", "hint": "..." }
-  ],
-  "portfolioSuggestions": [
-    "..."
-  ],
-  "projectSuggestions": [
-    {
-      "title": "...",
-      "description": "...",
-      "techStack": ["...", "..."]
-    }
+  "portfolioSuggestion": {
+    "title": "A highly customized portfolio showpiece project",
+    "description": "Specific project description that the student should build to stand out.",
+    "techStack": "React, Tailwind, Node.js"
+  },
+  "mockQuestions": [
+    { "question": "Technical/Behavioral question?", "type": "Technical / Behavioral", "guidance": "Detailed bullet-point advice on how to respond" }
   ],
   "timeline": {
-    "applicationStart": "Opened Now",
-    "applicationDeadline": "August 30, 2026",
-    "assessmentWindow": "September 5 - September 15, 2026",
-    "interviewDates": "October 2026",
-    "resultsDate": "November 2026"
-  },
-  "interviewTips": [
-    "..."
-  ]
+    "registration": "Registration Open",
+    "documentVerification": "Within 2 Weeks",
+    "assessmentPeriod": "Estimated Assessment Window",
+    "resultDeclaration": "Final Results Cycle"
+  }
 }
 
-Provide highly practical, specific, India-first resources (e.g. GeeksforGeeks, NPTEL, SWAYAM, Unstop Practice, standard DSA sheets). Do not output anything except the pure JSON structure.`;
+CRITICAL RULES:
+- The response MUST contain concise bullet points instead of long paragraphs.
+- Every preparation plan should address: Preparation roadmap, Recommended skills, Important technologies, Learning resources, Interview preparation, Projects to build, Certifications, Practice platforms, and Estimated timeline.
+- The response MUST be different and tailored to the student's unique career goal and profile dimensions.
+- Return ONLY valid JSON. No conversational text before or after.`;
 
+        console.log("[Prep Engine] Calling Gemini model gemini-3.6-flash...");
         const response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-3.6-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json",
@@ -1102,11 +1242,16 @@ Provide highly practical, specific, India-first resources (e.g. GeeksforGeeks, N
         });
 
         const resText = response.text || "{}";
-        const parsed = JSON.parse(resText.trim());
-        return res.json(parsed);
+        console.log("[Prep Engine] Gemini raw response retrieved:", resText.slice(0, 300) + "...");
+        
+        const parsed = extractJSON(resText);
+        const normalized = normalizePrepData(parsed);
+        
+        console.log("[Prep Engine] Sending normalized Gemini response to frontend.");
+        return res.json(normalized);
       }
-    } catch (err) {
-      console.error("Gemini roadmap generation error, falling back to local coach:", err);
+    } catch (err: any) {
+      console.error("[Prep Engine] Gemini roadmap generation error, falling back to local coach:", err.message || err);
     }
 
     // High-fidelity local roadmap generator fallback
@@ -1114,130 +1259,118 @@ Provide highly practical, specific, India-first resources (e.g. GeeksforGeeks, N
     const title = opportunityTitle || "Google India STEP Internship 2026";
     const prov = provider || "Google India";
 
+    console.log("[Prep Engine] Executing high-fidelity local fallback generator...");
+
     // Build template based on category
-    let roadmap: any[] = [];
-    let weeklyPlan: any[] = [];
+    let stages: any[] = [];
+    let weeks: any[] = [];
     let resources: any[] = [];
-    let practiceQuestions: any[] = [];
-    let portfolioSuggestions: string[] = [];
-    let projectSuggestions: any[] = [];
-    let timeline = {
-      applicationStart: "Opened Now",
-      applicationDeadline: "Within 30 Days",
-      assessmentWindow: "1-2 Weeks Post Deadline",
-      interviewDates: "4-6 Weeks Post Deadline",
-      resultsDate: "8 Weeks Post Deadline"
+    let mockQuestions: any[] = [];
+    let portfolioSuggestion = {
+      title: "Showcase Project",
+      description: "Develop a custom web application that solves a targeted domain problem.",
+      techStack: "React, TypeScript, Tailwind CSS"
     };
-    let interviewTips: string[] = [];
+    let timeline = {
+      registration: "Opened Now",
+      documentVerification: "Within 15 Days",
+      assessmentPeriod: "2-3 Weeks Later",
+      resultDeclaration: "2 Months Later"
+    };
 
     if (oppId.includes("sch-") || title.toLowerCase().includes("scholarship")) {
       // Scholarship Prep Template
-      roadmap = [
-        { stage: "Stage 1: Document Auditing", focus: "Collect verified parent income certificate, annual college bonafide certificate, fee slips, and marks cards." },
-        { stage: "Stage 2: Essay & Statement Drafting", focus: "Draft 500-word SOP detailing B.Tech aspirations, financial need, and community impact." },
-        { stage: "Stage 3: Institutional Endorsements", focus: "Obtain seal and signatures from your college registrar or academic office." },
-        { stage: "Stage 4: Submission & Verification Sync", focus: "Submit via portal, double-check Aadhaar seeding status, and track institute nodal approval." }
+      stages = [
+        { title: "Stage 1: Document Auditing", description: "Collect verified parent income certificate, annual college bonafide certificate, fee slips, and marks cards." },
+        { title: "Stage 2: Essay & Statement Drafting", description: "Draft 500-word SOP detailing B.Tech aspirations, financial need, and community impact." },
+        { title: "Stage 3: Institutional Endorsements", description: "Obtain seal and signatures from your college registrar or academic office." },
+        { title: "Stage 4: Submission & Verification Sync", description: "Submit via portal, double-check Aadhaar seeding status, and track institute nodal approval." }
       ];
-      weeklyPlan = [
-        { week: "Week 1", milestone: "Document Assembly", actions: ["Request Bonafide Certificate from Academic Section", "Verify Aadhaar is linked to your active bank account"] },
-        { week: "Week 2", milestone: "SOP & Statement", actions: ["Write your personal hardship essay detailing why you are pursuing engineering", "Get a senior or AI Mentor to review your scholarship statement"] },
-        { week: "Week 3", milestone: "Sponsorship & Seal", actions: ["Submit slips to college nodals for official PM-YASASVI/NSP verification seal", "Double-check income tax file status if parent is salaried"] },
-        { week: "Week 4", milestone: "Upload & Verify", actions: ["Scan all documents in high-resolution under 200KB limits", "Submit portal application and copy the tracking ID to SoulSync Tracker"] }
+      weeks = [
+        { weekNum: 1, milestone: "Document Assembly", actions: ["Request Bonafide Certificate from Academic Section", "Verify Aadhaar is linked to your active bank account"] },
+        { weekNum: 2, milestone: "SOP & Statement", actions: ["Write your personal hardship essay detailing why you are pursuing engineering", "Get a senior or AI Mentor to review your scholarship statement"] },
+        { weekNum: 3, milestone: "Sponsorship & Seal", actions: ["Submit slips to college nodals for official PM-YASASVI/NSP verification seal", "Double-check income tax file status if parent is salaried"] },
+        { weekNum: 4, milestone: "Upload & Verify", actions: ["Scan all documents in high-resolution under 200KB limits", "Submit portal application and copy the tracking ID to SoulSync Tracker"] }
       ];
       resources = [
-        { name: "National Scholarship Portal Official Guide", type: "Documentation", link: "https://scholarships.gov.in" },
-        { name: "How to write a winning Bonafide Scholarship Statement", type: "Video Guide", link: "https://youtube.com" }
+        { name: "National Scholarship Portal Official Guide", url: "https://scholarships.gov.in", platform: "NSP", type: "Documentation" },
+        { name: "SOP Video Reference", url: "https://youtube.com", platform: "YouTube", type: "Video Guide" }
       ];
-      practiceQuestions = [
-        { question: "How will this financial grant directly alter your focus on B.Tech technical projects?", type: "SOP", hint: "Explain that by having fee coverage, you can focus on building machine learning systems instead of taking freelance coding tasks." }
+      mockQuestions = [
+        { question: "How will this financial grant directly alter your focus on B.Tech technical projects?", type: "SOP", guidance: "Explain that by having fee coverage, you can focus on building machine learning systems instead of taking freelance coding tasks." }
       ];
-      portfolioSuggestions = [
-        "Include active academic achievements and college CGPA (ensure it stays above 7.5 or 8.0).",
-        "Add a clear summary of your B.Tech core focus (e.g. CSE AI/ML)."
-      ];
-      projectSuggestions = [
-        { title: "Personal Engineering Project Hub", description: "Set up a clean GitHub repository displaying 3 high-quality academic project folders with solid README files.", techStack: ["Markdown", "Git", "GitHub"] }
-      ];
-      interviewTips = [
-        "Ensure all data on NSP/AICTE match your official Aadhaar Card details EXACTLY.",
-        "Bank account must have Aadhaar Seeding active (very critical for DBT transfer)."
-      ];
+      portfolioSuggestion = {
+        title: "Personal Engineering Project Hub",
+        description: "Set up a clean GitHub repository displaying 3 high-quality academic project folders with solid README files.",
+        techStack: "Markdown, Git, GitHub"
+      };
     } else if (oppId.includes("hck-") || title.toLowerCase().includes("hackathon") || title.toLowerCase().includes("challenge")) {
       // Hackathon Prep Template
-      roadmap = [
-        { stage: "Stage 1: Team & Topic Selection", focus: "Form a 4-6 person multi-disciplinary team and select a high-impact problem statement." },
-        { stage: "Stage 2: System Architecture design", focus: "Draft complete flowcharts, choose tech stacks, database models, and write a 1-page concept." },
-        { stage: "Stage 3: Core MVP Build & Dockerization", focus: "Develop working frontend-backend APIs and dockerize the local setup." },
-        { stage: "Stage 4: Video Pitch & Slide Preparation", focus: "Record a crisp 3-minute working prototype demo video and refine presentation slides." }
+      stages = [
+        { title: "Stage 1: Team & Topic Selection", description: "Form a 4-6 person multi-disciplinary team and select a high-impact problem statement." },
+        { title: "Stage 2: System Architecture design", description: "Draft complete flowcharts, choose tech stacks, database models, and write a 1-page concept." },
+        { title: "Stage 3: Core MVP Build & Dockerization", description: "Develop working frontend-backend APIs and dockerize the local setup." },
+        { title: "Stage 4: Video Pitch & Slide Preparation", description: "Record a crisp 3-minute working prototype demo video and refine presentation slides." }
       ];
-      weeklyPlan = [
-        { week: "Week 1", milestone: "Team Formulation", actions: ["Unite 1 UI designer, 2 full-stack coders, and 1 presentation specialist", "Brainstorm problem statement solutions for Smart India Hackathon"] },
-        { week: "Week 2", milestone: "System Draft & UX", actions: ["Design system architecture diagram showing Express backend API endpoints", "Draft Figma wireframes for main student-facing pages"] },
-        { week: "Week 3", milestone: "MVP Dev Sprint", actions: ["Implement core React login and database storage syncing in 48 hours", "Verify API calls succeed without latency lags"] },
-        { week: "Week 4", milestone: "Pitch Deck & Video", actions: ["Create a 10-slide presentation following official SIH template guidelines", "Record working system screen-capture with clear verbal explanations"] }
+      weeks = [
+        { weekNum: 1, milestone: "Team Formulation", actions: ["Unite 1 UI designer, 2 full-stack coders, and 1 presentation specialist", "Brainstorm problem statement solutions for Smart India Hackathon"] },
+        { weekNum: 2, milestone: "System Draft & UX", actions: ["Design system architecture diagram showing Express backend API endpoints", "Draft Figma wireframes for main student-facing pages"] },
+        { weekNum: 3, milestone: "MVP Dev Sprint", actions: ["Implement core React login and database storage syncing in 48 hours", "Verify API calls succeed without latency lags"] },
+        { weekNum: 4, milestone: "Pitch Deck & Video", actions: ["Create a 10-slide presentation following official SIH template guidelines", "Record working system screen-capture with clear verbal explanations"] }
       ];
       resources = [
-        { name: "SIH Best Presentations Repository", type: "Interactive Practice", link: "https://www.sih.gov.in" },
-        { name: "Figma wireframe best practices for Hackathons", type: "Documentation", link: "https://figma.com" }
+        { name: "SIH Best Presentations Repository", url: "https://www.sih.gov.in", platform: "SIH Portal", type: "Interactive Practice" },
+        { name: "Figma wireframe best practices for Hackathons", url: "https://figma.com", platform: "Figma", type: "Documentation" }
       ];
-      practiceQuestions = [
-        { question: "What is your backup plan if the server APIs fail during the live jury evaluation?", type: "System", hint: "Confirm you have local database fallback nodes and cached client-side mock data active to guarantee continuous presentation UX." }
+      mockQuestions = [
+        { question: "What is your backup plan if the server APIs fail during the live jury evaluation?", type: "System", guidance: "Confirm you have local database fallback nodes and cached client-side mock data active to guarantee continuous presentation UX." }
       ];
-      portfolioSuggestions = [
-        "Add direct link to your team's hackathon project repository.",
-        "Pin working demo video to your GitHub profile."
-      ];
-      projectSuggestions = [
-        { title: "Devanagari OCR Prototype", description: "Lightweight browser-based neural network model that reads Hindi handwritten characters.", techStack: ["React", "TensorFlow.js", "Tailwind CSS"] }
-      ];
-      interviewTips = [
-        "Focus 70% of your presentation pitch on the tangible user benefit and business viability.",
-        "Never show slides only; a rough working prototype with static cached JSON is 10x better."
-      ];
+      portfolioSuggestion = {
+        title: "Devanagari OCR Prototype",
+        description: "Lightweight browser-based neural network model that reads Hindi handwritten characters.",
+        techStack: "React, TensorFlow.js, Tailwind CSS"
+      };
     } else {
       // Technical Internships / Certifications Prep Template
-      roadmap = [
-        { stage: "Stage 1: DSA & Logic foundations", focus: "Master arrays, hashing, sliding windows, recursion, and time complexity bounds." },
-        { stage: "Stage 2: Project Deployment", focus: "Refine 2 active personal full-stack projects on your GitHub, emphasizing secure API proxies." },
-        { stage: "Stage 3: Resume Review & Pitch", focus: "Construct a 1-page LaTeX format resume highlighting real metrics (e.g., 'reduced latency by 30%')." },
-        { stage: "Stage 4: Mock Rounds & Behavioral", focus: "Practice whiteboarding coding questions on Google Doc environment without autocomplete." }
+      stages = [
+        { title: "Stage 1: DSA & Logic foundations", description: "Master arrays, hashing, sliding windows, recursion, and time complexity bounds." },
+        { title: "Stage 2: Project Deployment", description: "Refine 2 active personal full-stack projects on your GitHub, emphasizing secure API proxies." },
+        { title: "Stage 3: Resume Review & Pitch", description: "Construct a 1-page LaTeX format resume highlighting real metrics (e.g., 'reduced latency by 30%')." },
+        { title: "Stage 4: Mock Rounds & Behavioral", description: "Practice whiteboarding coding questions on Google Doc environment without autocomplete." }
       ];
-      weeklyPlan = [
-        { week: "Week 1", milestone: "Data Structures Drill", actions: ["Solve 15 essential Array & Hashing problems on LeetCode/Unstop", "Practice complexity analysis (O(N) time, O(1) space constraints)"] },
-        { week: "Week 2", milestone: "Dynamic API Project", actions: ["Add Firestore backend or lazy client syncing to your current B.Tech web app", "Write clean TypeScript interfaces to enforce absolute type-safety"] },
-        { week: "Week 3", milestone: "Resume Optimization", actions: ["Quantify achievements: 'Trained model on 5,000 images achieving 94% accuracy'", "Format resume using standard single-column ATS templates"] },
-        { week: "Week 4", milestone: "Mock Loops", actions: ["Schedule a mock coding interview with SoulSync Companion", "Practice talking out loud while coding on a blank notebook page"] }
+      weeks = [
+        { weekNum: 1, milestone: "Data Structures Drill", actions: ["Solve 15 essential Array & Hashing problems on LeetCode/Unstop", "Practice complexity analysis (O(N) time, O(1) space constraints)"] },
+        { weekNum: 2, milestone: "Dynamic API Project", actions: ["Add Firestore backend or lazy client syncing to your current B.Tech web app", "Write clean TypeScript interfaces to enforce absolute type-safety"] },
+        { weekNum: 3, milestone: "Resume Optimization", actions: ["Quantify achievements: 'Trained model on 5,000 images achieving 94% accuracy'", "Format resume using standard single-column ATS templates"] },
+        { weekNum: 4, milestone: "Mock Loops", actions: ["Schedule a mock coding interview with SoulSync Companion", "Practice talking out loud while coding on a blank notebook page"] }
       ];
       resources = [
-        { name: "Blind 75 Curated DSA Sheet", type: "Interactive Practice", link: "https://leetcode.com" },
-        { name: "Google Software Engineering Intern Interview Process Guide", type: "Documentation", link: "https://careers.google.com" }
+        { name: "Blind 75 Curated DSA Sheet", url: "https://leetcode.com", platform: "LeetCode", type: "Interactive Practice" },
+        { name: "Google Intern Process Guide", url: "https://careers.google.com", platform: "Google Careers", type: "Documentation" }
       ];
-      practiceQuestions = [
-        { question: "Can you explain how your CNN OCR Handwriting Engine manages memory limits in the browser?", type: "Technical", hint: "Discuss using TensorFlow.js tidy blocks to clean GPU memory and prevent leak overheads." }
+      mockQuestions = [
+        { question: "Can you explain how your CNN OCR Handwriting Engine manages memory limits in the browser?", type: "Technical", guidance: "Discuss using TensorFlow.js tidy blocks to clean GPU memory and prevent leak overheads." }
       ];
-      portfolioSuggestions = [
-        "Include 2 production-ready projects with clean, public GitHub repositories.",
-        "Detail your role as the sole/lead full-stack architect."
-      ];
-      projectSuggestions = [
-        { title: "Dynamic Career Roadmap Engine", description: "Full-stack application that analyzes profile parameters and auto-generates localized weekly plans.", techStack: ["TypeScript", "Express", "Vite", "React"] }
-      ];
-      interviewTips = [
-        "Always communicate your reasoning clearly BEFORE starting to write any code.",
-        "If you get stuck, ask clarifying questions about input boundary conditions."
-      ];
+      portfolioSuggestion = {
+        title: "Dynamic Career Roadmap Engine",
+        description: "Full-stack application that analyzes profile parameters and auto-generates localized weekly plans.",
+        techStack: "TypeScript, Express, Vite, React"
+      };
     }
 
-    return res.json({
-      roadmap,
-      weeklyPlan,
+    const fallbackRaw = {
+      estimatedWeeks: 4,
+      stages,
+      weeks,
       resources,
-      practiceQuestions,
-      portfolioSuggestions,
-      projectSuggestions,
-      timeline,
-      interviewTips
-    });
+      portfolioSuggestion,
+      mockQuestions,
+      timeline
+    };
+
+    const fallbackNormalized = normalizePrepData(fallbackRaw);
+    console.log("[Prep Engine] Sending normalized local fallback response to frontend.");
+    return res.json(fallbackNormalized);
   });
 
   // Health check
