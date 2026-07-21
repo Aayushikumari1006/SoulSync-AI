@@ -1,0 +1,150 @@
+{
+  "collections": {
+    "users": {
+      "schema": {
+        "userId": "string",
+        "email": "string",
+        "name": "string",
+        "degree": "string",
+        "branch": "string",
+        "semester": "string",
+        "college": "string",
+        "careerGoal": "string",
+        "skills": "array",
+        "interests": "array",
+        "favouriteSubjects": "array",
+        "learningStyle": "string",
+        "weeklyAvailability": "number",
+        "preferredLanguage": "string",
+        "dreamCompany": "string",
+        "isOnboardingCompleted": "boolean",
+        "graduationYear": "string",
+        "city": "string",
+        "preferredLearningMethod": "string",
+        "preferredSessionLength": "string",
+        "preferredStudyTime": "string",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      },
+      "subcollections": {
+        "dreams": {
+          "schema": {
+            "id": "string",
+            "type": "string",
+            "title": "string",
+            "motivation": "string",
+            "targetYear": "string",
+            "confidence": "number",
+            "priority": "string",
+            "status": "string",
+            "dateAdded": "string"
+          }
+        },
+        "skillDetails": {
+          "schema": {
+            "name": "string",
+            "level": "string",
+            "progress": "number",
+            "confidence": "number"
+          }
+        },
+        "growthMissions": {
+          "schema": {
+            "id": "string",
+            "title": "string",
+            "deadline": "string",
+            "estimatedTime": "string",
+            "dreamImpact": "string",
+            "completed": "boolean",
+            "category": "string",
+            "updatedAt": "timestamp"
+          }
+        },
+        "tasks": {
+          "schema": {
+            "id": "string",
+            "title": "string",
+            "type": "string",
+            "duration": "number",
+            "status": "string",
+            "createdAt": "timestamp"
+          }
+        },
+        "forest": {
+          "schema": {
+            "id": "string",
+            "type": "string",
+            "status": "string",
+            "growth": "number",
+            "lastWatered": "timestamp",
+            "createdAt": "timestamp"
+          }
+        },
+        "soulPrint": {
+          "schema": {
+            "id": "string",
+            "category": "string",
+            "text": "string",
+            "createdAt": "timestamp"
+          }
+        },
+        "weeklyReflections": {
+          "schema": {
+            "id": "string",
+            "question": "string",
+            "answer": "string",
+            "tags": "array",
+            "createdAt": "timestamp"
+          }
+        },
+        "futureLetters": {
+          "schema": {
+            "id": "string",
+            "targetDuration": "string",
+            "content": "string",
+            "createdAt": "timestamp"
+          }
+        },
+        "mentorHistory": {
+          "schema": {
+            "id": "string",
+            "sender": "string",
+            "text": "string",
+            "timestamp": "timestamp"
+          }
+        },
+        "settings": {
+          "schema": {
+            "reducedMotion": "boolean",
+            "highContrast": "boolean",
+            "staticBackground": "boolean",
+            "muteSounds": "boolean",
+            "soundVolume": "number"
+          }
+        },
+        "notifications": {
+          "schema": {
+            "id": "string",
+            "text": "string",
+            "read": "boolean",
+            "createdAt": "timestamp"
+          }
+        }
+      }
+    },
+    "opportunities": {
+      "schema": {
+        "id": "string",
+        "type": "string",
+        "title": "string",
+        "provider": "string",
+        "description": "string",
+        "stipendOrValue": "string",
+        "deadline": "string",
+        "closingSoon": "boolean",
+        "tags": "array",
+        "applyUrl": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "SoulSync AI",
+  "description": "Emotional AI-powered Career & Wellbeing Companion for Higher Education students in India. Understanding you beyond your goals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
