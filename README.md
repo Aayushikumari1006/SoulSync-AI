@@ -302,9 +302,9 @@ SoulSync AI contributes towards:
 # 💻 Local Setup
 
 ```bash
-git clone https://github.com/<your-username>/<repository-name>.git
+git clone (https://github.com/Aayushikumari1006/SoulSync-AI)
 
-cd <repository-name>
+cd SoulSync-AI
 
 npm install
 
